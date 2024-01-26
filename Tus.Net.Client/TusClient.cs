@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 using Tus.Net.Client.Responses;
 
@@ -21,15 +22,17 @@ namespace Tus.Net.Client
         /// <param name="customHeaders">Any custom headers, such as authorization for this end point</param>
         /// <param name="metadata">metadata, such as filename, filetype, will be extracted from fileInfo but can be overwritten</param>
         /// <param name="tusOptions">Options to set the HttpClient, Logging and TUSVersion</param>
+        /// <param name="cancellationToken"></param>
         /// <returns>A TusCreatedResponse if successful</returns>
         public static async Task<TusCreatedResponse> CreateEndpointAsync(
             string serverEndPoint,
             FileInfo fileInfo,
             Dictionary<string, string> customHeaders,
             Dictionary<string, string> metadata,
-            TusOptions tusOptions = null)
+            TusOptions tusOptions = null,
+            CancellationToken cancellationToken = default)
         {
-            return await CreateEndpointAsync(serverEndPoint, fileInfo.Length, fileInfo.Name, fileInfo.Extension, customHeaders, metadata, tusOptions);
+            return await CreateEndpointAsync(serverEndPoint, fileInfo.Length, fileInfo.Name, fileInfo.Extension, customHeaders, metadata, tusOptions, cancellationToken);
         }
 
         /// <summary>
@@ -42,6 +45,7 @@ namespace Tus.Net.Client
         /// <param name="customHeaders">Any custom headers, such as authorization for this end point</param>
         /// <param name="metadata">metadata, such as filename, filetype, will be extracted from fileInfo but can be overwritten</param>
         /// <param name="tusOptions">Options to set the HttpClient, Logging and TUSVersion</param>
+        /// <param name="cancellationToken"></param>
         /// <returns>A TusCreatedResponse if successful</returns>
         public static async Task<TusCreatedResponse> CreateEndpointAsync(
             string serverEndPoint,
@@ -50,13 +54,14 @@ namespace Tus.Net.Client
             string fileType,
             Dictionary<string, string> customHeaders,
             Dictionary<string, string> metadata,
-            TusOptions tusOptions = null)
+            TusOptions tusOptions = null,
+            CancellationToken cancellationToken = default)
             
         {
             try
             {
                 TusProtocol protocol = new(tusOptions);
-                HttpResponseMessage responseMessage = await protocol.CreateAsync(serverEndPoint, fileSize, fileName, fileType, customHeaders, metadata);
+                HttpResponseMessage responseMessage = await protocol.CreateAsync(serverEndPoint, fileSize, fileName, fileType, customHeaders, metadata, cancellationToken);
                 Uri uri = responseMessage.Headers.Location;
                 return new(responseMessage, responseMessage.StatusCode == HttpStatusCode.Created, uri?.ToString());
             }
@@ -81,12 +86,13 @@ namespace Tus.Net.Client
         public static async Task<TusHeadResponse> GetUploadProgressAsync(
             string endPoint, 
             Dictionary<string, string> customHeaders, 
-            TusOptions tusOptions = null)
+            TusOptions tusOptions = null,
+            CancellationToken cancellationToken = default)
         {
             try
             {
                 TusProtocol protocol = new(tusOptions);
-                HttpResponseMessage responseMessage = await protocol.HeadAsync(endPoint, customHeaders);
+                HttpResponseMessage responseMessage = await protocol.HeadAsync(endPoint, customHeaders, cancellationToken);
                 long? uploadOffset = null;
                 if (responseMessage.Headers.Contains(TusHeaders.UploadOffset) &&
                     long.TryParse(responseMessage.Headers.GetValues(TusHeaders.UploadOffset).FirstOrDefault(), out long uploadOffsetHeaderValue))
@@ -116,10 +122,11 @@ namespace Tus.Net.Client
         public static async Task<TusDeleteResponse> DeleteFileAsync(
             string endPoint, 
             Dictionary<string, string> customHeaders, 
-            TusOptions tusOptions = null)
+            TusOptions tusOptions = null,
+            CancellationToken cancellationToken = default)
         {
             TusProtocol protocol = new(tusOptions);
-            HttpResponseMessage responseMessage = await protocol.DeleteAsync(endPoint, customHeaders);
+            HttpResponseMessage responseMessage = await protocol.DeleteAsync(endPoint, customHeaders, cancellationToken);
             bool deleted = responseMessage.StatusCode is HttpStatusCode.NoContent or HttpStatusCode.NotFound or HttpStatusCode.Gone;
             return new(responseMessage, deleted);
         }

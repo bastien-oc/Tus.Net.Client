@@ -4,10 +4,13 @@ using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Threading;
 using System.Threading.Tasks;
+using JetBrains.Annotations;
 
 namespace Tus.Net.Client
 {
+    [PublicAPI]
     public sealed class TusProtocol
     {
         private readonly TusOptions _tusOptions;
@@ -27,14 +30,14 @@ namespace Tus.Net.Client
         /// <param name="url">The Url of the upload</param>
         /// <param name="customHeaders">Any custom headers, such as authentication/authorisation that need to be added for this particular API</param>
         /// <returns>Either 200 OK or 404 Not Found, 410 Gone or 403 Forbidden depending on circumstance</returns>
-        public async Task<HttpResponseMessage> HeadAsync(string url, Dictionary<string, string> customHeaders = null)
+        public async Task<HttpResponseMessage> HeadAsync(string url, Dictionary<string, string> customHeaders = null, CancellationToken cancellationToken = default)
         {
             try
             {
-                TusHttpClient client = new(this._tusOptions);
+                var client = _tusOptions.HttpClient;
                 HttpRequestMessage requestMessage = BuildRequest(customHeaders, HttpMethod.Head, url);
                 requestMessage.Headers.Add(TusHeaders.TusResumable, this._tusOptions.TusVersion);
-                HttpResponseMessage responseMessage = await client.SendAsync(requestMessage);
+                HttpResponseMessage responseMessage = await client.SendAsync(requestMessage, cancellationToken);
                 return responseMessage;
             }
             catch (Exception e)
@@ -43,7 +46,7 @@ namespace Tus.Net.Client
                 throw;
             }
         }
-        
+
         /// <summary>
         /// Create an upload Url and file location for patching requests to, not supported by all protocols.
         /// </summary>
@@ -51,14 +54,16 @@ namespace Tus.Net.Client
         /// <param name="file">The FileInfo of the file to be uploaded</param>
         /// <param name="customHeaders">Any custom headers, such as authentication/authorisation that need to be added for this particular API</param>
         /// <param name="metadata"></param>
+        /// <param name="cancellationToken"></param>
         /// <returns>201 successful if created</returns>
         public async Task<HttpResponseMessage> CreateAsync(
             string url,
             FileInfo file,
             Dictionary<string, string> customHeaders = null,
-            Dictionary<string, string> metadata = null)
+            Dictionary<string, string> metadata = null,
+            CancellationToken cancellationToken = default)
         {
-            return await CreateAsync(url, file.Length, file.Name, file.Extension, customHeaders, metadata);
+            return await CreateAsync(url, file.Length, file.Name, file.Extension, customHeaders, metadata, cancellationToken);
         }
 
         /// <summary>
@@ -70,6 +75,7 @@ namespace Tus.Net.Client
         /// <param name="fileExtension">The extension of the given file (.mov, .mp4)</param>
         /// <param name="customHeaders">Any custom headers, such as authentication/authorisation that need to be added for this particular API</param>
         /// <param name="metadata"></param>
+        /// <param name="cancellationToken"></param>
         /// <returns>201 successful if created</returns>
         public async Task<HttpResponseMessage> CreateAsync(
             string url,
@@ -77,7 +83,8 @@ namespace Tus.Net.Client
             string fileName,
             string fileExtension,
             Dictionary<string, string> customHeaders = null,
-            Dictionary<string, string> metadata = null)
+            Dictionary<string, string> metadata = null,
+            CancellationToken cancellationToken = default)
         {
             metadata ??= new();
             if (!metadata.ContainsKey("filename"))
@@ -89,24 +96,23 @@ namespace Tus.Net.Client
             {
                 metadata["filetype"] = fileExtension;
             }
-            return await CreateAsync(url, fileLength, customHeaders, metadata);
+            return await CreateAsync(url, fileLength, customHeaders: customHeaders, metadata: metadata, cancellationToken: cancellationToken);
         }
-        
+
         /// <summary>
         /// Create an upload Url and file location for patching requests to, not supported by all protocols.
         /// </summary>
         /// <param name="url">The Url of the upload</param>
         /// <param name="fileLength">The size of the file in bytes</param>
+        /// <param name="cancellationToken"></param>
         /// <param name="customHeaders">Any custom headers, such as authentication/authorisation that need to be added for this particular API</param>
         /// <param name="metadata"></param>
         /// <returns>201 successful if created</returns>
-        public async Task<HttpResponseMessage> CreateAsync(
-            string url,
-            long fileLength,
-            Dictionary<string, string> customHeaders = null,
-            Dictionary<string, string> metadata = null)
+        public async Task<HttpResponseMessage> CreateAsync(string url,
+            long fileLength, Dictionary<string, string> customHeaders = null,
+            Dictionary<string, string> metadata = null, CancellationToken cancellationToken = default)
         {
-            TusHttpClient client = new(this._tusOptions);
+            var client = _tusOptions.HttpClient;
             HttpRequestMessage requestMessage = BuildRequest(customHeaders, HttpMethod.Post, url);
 
             requestMessage.Content = new StringContent("");
@@ -126,7 +132,7 @@ namespace Tus.Net.Client
             requestMessage.Headers.Add(TusHeaders.UploadMetadata, string.Join(",", metadataStrings.ToArray()).Trim());
             requestMessage.Headers.Add(TusHeaders.TusResumable, this._tusOptions.TusVersion);
 
-            HttpResponseMessage responseMessage = await client.SendAsync(requestMessage);
+            HttpResponseMessage responseMessage = await client.SendAsync(requestMessage, cancellationToken);
             return responseMessage;
         }
 
@@ -139,15 +145,16 @@ namespace Tus.Net.Client
         /// <param name="offset">Where to start the upload from</param>
         /// <param name="chunkSize">The maximum size of this upload patch, will be automatically reduced for the last patch</param>
         /// <param name="customHeaders">Any custom headers, such as authentication/authorisation that need to be added for this particular API</param>
+        /// <param name="cancellationToken"></param>
         /// <returns>204 no content if successful, 409 if offsets mismatch, 404 if resource doesn't exist</returns>
         public async Task<HttpResponseMessage> PatchAsync(string url, FileInfo file, long offset, int chunkSize,
-            Dictionary<string, string> customHeaders = null)
+            Dictionary<string, string> customHeaders = null, CancellationToken cancellationToken = default)
         {
             await using FileStream fs = new(file.FullName, FileMode.Open, FileAccess.Read);
-            return await PatchAsync(url, fs, offset, chunkSize, customHeaders);
+            return await PatchAsync(url, fs, offset, chunkSize, customHeaders, cancellationToken);
         }
 
-        
+
         /// <summary>
         /// Used to patch part of a file that has been created or stopped during an upload
         /// </summary>
@@ -156,12 +163,13 @@ namespace Tus.Net.Client
         /// <param name="offset">Where to start the upload from</param>
         /// <param name="chunkSize">The maximum size of this upload patch, will be automatically reduced for the last patch</param>
         /// <param name="customHeaders">Any custom headers, such as authentication/authorisation that need to be added for this particular API</param>
+        /// <param name="cancellationToken"></param>
         /// <returns>204 no content if successful, 409 if offsets mismatch, 404 if resource doesn't exist</returns>
-        public async Task<HttpResponseMessage> PatchAsync(string url, Stream fs, long offset, int chunkSize, Dictionary<string, string> customHeaders = null)
+        public async Task<HttpResponseMessage> PatchAsync(string url, Stream fs, long offset, int chunkSize, Dictionary<string, string> customHeaders = null, CancellationToken cancellationToken = default)
         {
             try
             {
-                TusHttpClient client = new(this._tusOptions);
+                var client = _tusOptions.HttpClient;
                 System.Security.Cryptography.SHA1 sha = new System.Security.Cryptography.SHA1Managed();
 
                 fs.Seek(offset, SeekOrigin.Begin);
@@ -179,7 +187,7 @@ namespace Tus.Net.Client
                 requestMessage.Content = new ByteArrayContent(buffer);
                 requestMessage.Content.Headers.Add("Content-Length", bytesRead.ToString());
                 requestMessage.Content.Headers.ContentType = MediaTypeHeaderValue.Parse("application/offset+octet-stream");
-                return await client.SendAsync(requestMessage);
+                return await client.SendAsync(requestMessage, cancellationToken);
             }
             catch (Exception e)
             {
@@ -195,11 +203,11 @@ namespace Tus.Net.Client
         /// <param name="url">The server URL for where to check the Options of the server</param>
         /// <param name="customHeaders">Any custom headers, such as authentication/authorisation that need to be added for this particular API</param>
         /// <returns></returns>
-        public async Task<HttpResponseMessage> OptionsAsync(string url, Dictionary<string, string> customHeaders = null)
+        public async Task<HttpResponseMessage> OptionsAsync(string url, Dictionary<string, string> customHeaders = null, CancellationToken cancellationToken = default)
         {
-            TusHttpClient client = new(this._tusOptions);
+            var client = _tusOptions.HttpClient;
             HttpRequestMessage requestMessage = BuildRequest(customHeaders, HttpMethod.Options, url);
-            return await client.SendAsync(requestMessage);
+            return await client.SendAsync(requestMessage, cancellationToken);
         }
 
         /// <summary>
@@ -208,13 +216,13 @@ namespace Tus.Net.Client
         /// <param name="url"></param>
         /// <param name="customHeaders"></param>
         /// <returns></returns>
-        public async Task<HttpResponseMessage> DeleteAsync(string url, Dictionary<string, string> customHeaders = null)
+        public async Task<HttpResponseMessage> DeleteAsync(string url, Dictionary<string, string> customHeaders = null, CancellationToken cancellationToken = default)
         {
-            TusHttpClient client = new(this._tusOptions);
+            var client = _tusOptions.HttpClient;
             HttpRequestMessage requestMessage = BuildRequest(customHeaders, HttpMethod.Delete, url);
             requestMessage.Headers.Add(TusHeaders.TusResumable, this._tusOptions.TusVersion);
 
-            return await client.SendAsync(requestMessage);
+            return await client.SendAsync(requestMessage, cancellationToken);
         }
         
         
